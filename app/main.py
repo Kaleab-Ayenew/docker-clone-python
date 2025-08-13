@@ -12,6 +12,7 @@ def main():
         print(completed_process.stdout.decode("utf-8").strip(), file=sys.stdout)
     if completed_process.stderr:
         print(completed_process.stderr.decode("utf-8").strip(), file=sys.stderr)
+    sys.exit(completed_process.returncode)
 
 
 if __name__ == "__main__":
