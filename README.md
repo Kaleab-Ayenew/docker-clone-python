@@ -4,6 +4,7 @@
 - File system isolation through `chroot`
 - Process namespace isolation
 - Resource allocation limits through `cgroups`
+- Docker pull and run like commands that download images from Docker image registry
 
 ## Working on:
 - Container network isolation
