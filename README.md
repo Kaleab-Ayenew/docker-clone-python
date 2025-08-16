@@ -4,3 +4,17 @@
 - File system isolation through `chroot`
 - Process namespace isolation
 - Resource allocation limits through `cgroups`
+
+## Working on:
+- Container network isolation
+
+## Coming up:
+- Persistent Storage - Volumes
+- Container Lifecycle Management
+- Image Management
+- Logging and Inspection
+- Interactive Sessions
+- Multi-Container Applications with Networking
+- Security Enhancements
+- Container Orchestration Primitives
+- Plugin Architecture
