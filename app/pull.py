@@ -1,8 +1,32 @@
+import sys
 import requests, tarfile
 from pathlib import Path
 import os
-from app.configs import LOCAL_IMAGE_REGISTRY, SESSION_DATA_PATH
+from app.configs import LOCAL_IMAGE_REGISTRY, SESSION_DATA_PATH, LAYER_BLOB_PATH, EXTRACTED_LAYERS_PATH
 import  json
+import gzip
+import hashlib
+
+import shutil
+
+def sha256_of_tgz_stream(filepath):
+    sha256_hash = hashlib.sha256()
+    block_size = 65536  # You can adjust this value for performance
+    try:
+        with gzip.open(filepath, 'rb') as f:
+            while True:
+                chunk = f.read(block_size)
+                if not chunk:
+                    break
+                sha256_hash.update(chunk)
+    except FileNotFoundError:
+        print(f"Error: The file '{filepath}' was not found.")
+        return None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
+
+    return sha256_hash.hexdigest()
 
 
 def download_layer(download_url, digest: str, auth_data, dir):
@@ -24,7 +48,6 @@ def download_layer(download_url, digest: str, auth_data, dir):
 def extract_layer(layer_path, dest_path):
     with tarfile.open(layer_path, mode="r:*") as tar:
         tar.extractall(dest_path)
-
 
 
 def parse_auth_data(data: str):
@@ -72,6 +95,12 @@ def docker_pull(image, dest_dir):
         manifest_rsp = requests.get(pull_url, headers={"Accept": "application/vnd.docker.distribution.manifest.v2+json", "Authorization": f"{token_scheme} {token}"})
         
     manifest_data = manifest_rsp.json()
+    manifests_dir = f"{LOCAL_IMAGE_REGISTRY}/{image_name}/manifests"
+    os.makedirs(manifests_dir, exist_ok=True)
+    if not (Path(manifests_dir)/"base_manifest.json").exists():
+        with open(Path(manifests_dir)/"base_manifest.json", "w") as f:
+            json.dump(manifest_data, f)
+
     print(manifest_data)
     layer_list = []
     for m in manifest_data["manifests"]:
@@ -79,20 +108,42 @@ def docker_pull(image, dest_dir):
             continue
         manifest_url = f"https://registry-1.docker.io/v2/library/{image_name}/blobs/{m['digest']}"
         digest_data = requests.get(manifest_url, headers={"Accept": "application/vnd.docker.distribution.manifest.v2+json", "Authorization": f"{token_scheme} {token}"}).json()
+        if not (Path(manifests_dir)/"arch_manifest.json").exists():
+            with open(Path(manifests_dir)/"arch_manifest.json", "w") as f:
+                json.dump(digest_data, f)
         for l in digest_data['layers']:
+            if l['digest']in os.listdir(LAYER_BLOB_PATH):
+                print(f"Layer with hash: {l['digest']} already exists.")
+                continue
             blob_url = f"https://registry-1.docker.io/v2/library/{image_name}/blobs/{l['digest']}"
-            layer_list.append(download_layer(blob_url, m['digest'], {"Authorization": f"{token_scheme} {token}"}, f"{dest_dir}/{image_name}/layers"))
+            layer_list.append(download_layer(blob_url, l['digest'], {"Authorization": f"{token_scheme} {token}"}, LAYER_BLOB_PATH))
+            decompressed_hash = sha256_of_tgz_stream(Path(LAYER_BLOB_PATH)/l['digest'])
+            extract_layer(Path(LAYER_BLOB_PATH)/l['digest'], Path(EXTRACTED_LAYERS_PATH)/decompressed_hash)
+            print(f"Extracted layer to: {Path(EXTRACTED_LAYERS_PATH)/decompressed_hash}")
+        config_manifest_url = f"https://registry-1.docker.io/v2/library/{image_name}/blobs/{digest_data['config']['digest']}"
+        config_manifest_data = requests.get(config_manifest_url, headers={"Authorization": f"{token_scheme} {token}"}).json()
+        
+        if not (Path(manifests_dir)/"config_manifest.json").exists():
+            print("[*] Creating the config manifest data...")
+            with open(Path(manifests_dir)/"config_manifest.json","w") as f:
+                json.dump(config_manifest_data, f)
+        
+        
 
     return Path(f"{dest_dir}/{image_name}/layers")
 
 
 def docker_run(dest_dir: str, image_dir: Path):
-    print("Image dir: ", image_dir)
     extract_dir = Path(dest_dir)
     extract_dir.mkdir(parents=True, exist_ok=True)
     layer_list = os.listdir(image_dir)
     for l in layer_list:
-        extract_layer(image_dir/l, extract_dir)
+        print(image_dir, extract_dir)
+
+
+
+
 
 if __name__ == "__main__":
-    docker_pull("alpine:latest")
+    image_with_tag = sys.argv[1]
+    docker_pull(image_with_tag, LOCAL_IMAGE_REGISTRY)

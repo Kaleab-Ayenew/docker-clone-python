@@ -4,6 +4,7 @@ import sys
 import os
 import secrets
 from app.pull import docker_pull, docker_run
+from app import configs 
 import tempfile
 import uuid
 from pathlib import Path
@@ -58,19 +59,34 @@ def manage_cgroup(image_name: str, mem_limit: str, cpu_percent: int):
         except OSError as e:
             print(f"Error cleaning up cgroup {cgroup_path}: {e}", file=sys.stderr)
 
+def perform_pivot(new_rt, put_old_rt):
+    pv_rt = libc.pivot_root
+    pv_rt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    pv_rt.restype = ctypes.c_int
+
+    if pv_rt(new_rt.encode("utf-8"), put_old_rt.encode("utf-8")) == -1:
+        errno = ctypes.get_errno()
+        print(f"Error during pivot_root: [Errno {errno}] {os.strerror(errno)}")
+        sys.exit(1)
+    else:
+        print(f"Successfully pivoted root to {new_root_path}, old root moved to {put_old_path}")
+    os.chdir("/")
+    print("Changed current working directory to /")
 
 def main(image):
 
         command = sys.argv[3]
         args = sys.argv[4:]
         image_dir = docker_pull(image, LOCAL_IMAGE_REGISTRY)
-        
+        runtime_dir = config"_".join(image.split(":"))
         with tempfile.TemporaryDirectory() as temp_dir:
-            docker_run(temp_dir, image_dir)
+            # docker_run(temp_dir, image_dir)
+
+            shutil.copy("/etc/resolv.conf", os.path.join(temp_dir, "etc", "resolv.conf"))
             chrooted_cmd = ["unshare", "-fp", "--mount-proc", "--", "chroot", temp_dir, command.split("/")[-1]]
             try:
                 with manage_cgroup(image, "500MB", 20) as cgroup_path:
-
+                    
                     container_process = subprocess.Popen([*chrooted_cmd, *args], stderr=sys.stderr,stdout=sys.stdout, stdin=sys.stdin, text=True)
                     (cgroup_path/"cgroup.procs").write_text(str(container_process.pid))
                     con_stdout, con_stderr = container_process.communicate()

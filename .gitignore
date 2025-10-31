@@ -155,3 +155,7 @@ temp/
 session.json
 images/
 prompt.md
+layer_blobs/
+runtimes/
+venv/
+extracted_layers/
