@@ -46,6 +46,7 @@ def download_layer(download_url, digest: str, auth_data, dir):
     return download_path/digest
 
 def extract_layer(layer_path, dest_path):
+    os.makedirs(dest_path, exist_ok=True)
     with tarfile.open(layer_path, mode="r:*") as tar:
         tar.extractall(dest_path)
 
@@ -111,15 +112,18 @@ def docker_pull(image, dest_dir):
         if not (Path(manifests_dir)/"arch_manifest.json").exists():
             with open(Path(manifests_dir)/"arch_manifest.json", "w") as f:
                 json.dump(digest_data, f)
+
         for l in digest_data['layers']:
-            if l['digest']in os.listdir(LAYER_BLOB_PATH):
-                print(f"Layer with hash: {l['digest']} already exists.")
-                continue
-            blob_url = f"https://registry-1.docker.io/v2/library/{image_name}/blobs/{l['digest']}"
-            layer_list.append(download_layer(blob_url, l['digest'], {"Authorization": f"{token_scheme} {token}"}, LAYER_BLOB_PATH))
-            decompressed_hash = sha256_of_tgz_stream(Path(LAYER_BLOB_PATH)/l['digest'])
-            extract_layer(Path(LAYER_BLOB_PATH)/l['digest'], Path(EXTRACTED_LAYERS_PATH)/decompressed_hash)
-            print(f"Extracted layer to: {Path(EXTRACTED_LAYERS_PATH)/decompressed_hash}")
+            blob_path = Path(LAYER_BLOB_PATH) / l['digest']
+            if not blob_path.exists():
+                blob_url = f"https://registry-1.docker.io/v2/library/{image_name}/blobs/{l['digest']}"
+                blob_path = download_layer(blob_url, l['digest'], {"Authorization": f"{token_scheme} {token}"}, LAYER_BLOB_PATH)
+
+            decompressed_hash = sha256_of_tgz_stream(blob_path)
+            dest_dir = Path(EXTRACTED_LAYERS_PATH) / decompressed_hash
+            extract_layer(blob_path, dest_dir)
+            print(f"Extracted layer to: {dest_dir}")
+            
         config_manifest_url = f"https://registry-1.docker.io/v2/library/{image_name}/blobs/{digest_data['config']['digest']}"
         config_manifest_data = requests.get(config_manifest_url, headers={"Authorization": f"{token_scheme} {token}"}).json()
         
